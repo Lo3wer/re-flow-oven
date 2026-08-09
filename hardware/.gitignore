@@ -1,0 +1,19 @@
+# KiCad lock files
+*.lck
+
+# Project-local settings
+*.kicad_prl
+
+# Cache
+fp-info-cache
+
+# KiCad incremental backup history (embedded git repo)
+.history/
+
+# KiCad restore backups
+_restore_backup_*/
+
+# KiCad backups
+*-backups/
+*.kicad_pcb-bak
+*.kicad_sch-bak
