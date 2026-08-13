@@ -1,0 +1,27 @@
+# ---- CMake / build artifacts (firmware) ----
+firmware/firmware/build/
+
+# ---- Compiled firmware outputs ----
+*.elf
+*.o
+*.obj
+*.map
+*.bin
+*.hex
+*.lst
+*.su
+
+# ---- VS Code ----
+# IntelliSense is handled by clangd (see .clangd + compile_commands.json).
+# .vscode/ holds only local/user settings, so it is not committed.
+.vscode/
+
+# ---- IDE / editor ----
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+
+# ---- OS / misc ----
+desktop.ini
