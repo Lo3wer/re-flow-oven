@@ -1,6 +1,9 @@
 # ---- CMake / build artifacts (firmware) ----
 firmware/firmware/build/
 
+# ---- PlatformIO build artifacts ----
+firmware/.pio/
+
 # ---- Compiled firmware outputs ----
 *.elf
 *.o
