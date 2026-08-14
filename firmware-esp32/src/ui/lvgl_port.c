@@ -28,7 +28,7 @@
 
 static esp_lcd_panel_handle_t s_panel;
 static lv_display_t *s_disp;
-static lv_indev_t *s_indev;
+static void (*s_poll_cb)(void);
 
 static uint32_t lv_tick_ms(void)
 {
@@ -45,34 +45,21 @@ static void lv_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_m
     lv_display_flush_ready(disp);
 }
 
-static void lv_keypad_read_cb(lv_indev_t *indev, lv_indev_data_t *data)
-{
-    (void)indev;
-    data->key = 0;
-    if (buttons_is_pressed(0)) {
-        data->key = LV_KEY_ENTER;
-    } else if (buttons_is_pressed(1)) {
-        data->key = LV_KEY_UP;
-    } else if (buttons_is_pressed(2)) {
-        data->key = LV_KEY_DOWN;
-    }
-    data->state = (data->key != 0) ? LV_INDEV_STATE_PRESSED : LV_INDEV_STATE_RELEASED;
-}
-
 static void lvgl_task(void *arg)
 {
     (void)arg;
     while (1) {
         lv_timer_handler();
+        if (s_poll_cb) {
+            s_poll_cb();
+        }
         vTaskDelay(pdMS_TO_TICKS(5));
     }
 }
 
-void lvgl_port_set_group(lv_group_t *group)
+void lvgl_port_set_poll_cb(void (*cb)(void))
 {
-    if (s_indev) {
-        lv_indev_set_group(s_indev, group);
-    }
+    s_poll_cb = cb;
 }
 
 void lvgl_port_init(void)
@@ -141,10 +128,6 @@ void lvgl_port_init(void)
     lv_display_set_buffers(s_disp, buf, NULL, LCD_H_RES * LCD_V_RES * sizeof(uint16_t),
                            LV_DISPLAY_RENDER_MODE_FULL);
     lv_display_set_flush_cb(s_disp, lv_flush_cb);
-
-    s_indev = lv_indev_create();
-    lv_indev_set_type(s_indev, LV_INDEV_TYPE_KEYPAD);
-    lv_indev_set_read_cb(s_indev, lv_keypad_read_cb);
 
     xTaskCreate(lvgl_task, "lvgl", 4096, NULL, 5, NULL);
 }

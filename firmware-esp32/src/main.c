@@ -7,9 +7,9 @@
 
 #include "controller.h"
 #include "history.h"
-#include "profile.h"
 #include "relay.h"
 #include "safety.h"
+#include "storage/config.h"
 #include "thermocouple.h"
 #include "ui.h"
 
@@ -18,19 +18,6 @@
 #define PID_KP 8.0f  // duty per deg C of error
 #define PID_KI 0.05f // duty per (deg C * s) of accumulated error
 #define PID_KD 20.0f // duty per (deg C/s) of error change
-
-// Placeholder default profile; edit via the UI or NVS later.
-static reflow_profile_t s_profile = {
-    .name = "GENERIC",
-    .num_phases = 5,
-    .phases = {
-        { "RAMP", 2.0f, 150.0f, 0.0f },
-        { "SOAK", 2.0f, 200.0f, 60.0f },
-        { "RAMP", 2.0f, 245.0f, 0.0f },
-        { "PEAK", 0.5f, 245.0f, 30.0f },
-        { "COOL", 1.0f, 80.0f, 0.0f },
-    },
-};
 
 static controller_t s_ctrl;
 static history_t s_history;
@@ -86,13 +73,16 @@ static void temp_task(void *arg)
         .sensor_fault_count = 3,
         .max_run_s = 600.0f, // 10 min watchdog
     };
-    ctrl_init(&s_ctrl, &scfg, &s_profile, PID_KP, PID_KI, PID_KD);
+    ctrl_init(&s_ctrl, &scfg, &config_profiles()[config_selected()], PID_KP, PID_KI, PID_KD);
     history_init(&s_history);
 
     int64_t last = esp_timer_get_time();
     while (1) {
         float dt = (esp_timer_get_time() - last) / 1e6f;
         last = esp_timer_get_time();
+
+        // Keep the controller pointed at the profile the user has selected/edited.
+        ctrl_set_profile(&s_ctrl, &config_profiles()[config_selected()]);
 
         int temp = tc_read_tenths();
         bool sensor_ok = temp >= 0;
@@ -118,6 +108,7 @@ static void temp_task(void *arg)
 
 void app_main(void)
 {
+    config_init();
     ui_init();
     tc_init();
     relay_init();
