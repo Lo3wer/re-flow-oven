@@ -1,18 +1,20 @@
 #pragma once
 
 #include <stdbool.h>
-#include <stdint.h>
 
-#define LCD_H_RES 240
-#define LCD_V_RES 135
+typedef enum {
+    UI_CMD_START,
+    UI_CMD_STOP,
+    UI_CMD_ACK,
+} ui_cmd_t;
 
-#define COLOR_BLACK 0x0000
-#define COLOR_WHITE 0xFFFF
-#define COLOR_GREY  0x8410
-#define COLOR_GREEN 0x07E0
+typedef void (*ui_cmd_cb_t)(ui_cmd_t cmd);
 
 void ui_init(void);
-void ui_draw_initial(void);
-void ui_draw_button_state(int btn, bool pressed);
-void ui_draw_temp_line(int temp_tenths, const char *note); // note (e.g. fault) drawn after the temp, or NULL
-void ui_flush(void);
+void ui_set_cmd_cb(ui_cmd_cb_t cb);
+void ui_set_temp(float temp_c, bool sensor_open);
+void ui_set_state_text(const char *text); // "IDLE"/"RUN ..."/"DONE"/"FAULT ..."
+void ui_set_running(bool running);
+void ui_set_phase(float progress01); // 0..1 profile progress
+void ui_set_setpoint(float sp_c);
+void ui_set_duty_pct(float pct);

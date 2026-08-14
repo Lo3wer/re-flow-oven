@@ -57,6 +57,23 @@ float ctrl_setpoint(const controller_t *c)
     return c->setpoint_c;
 }
 
+float ctrl_phase_progress(const controller_t *c)
+{
+    if (c->state != CTRL_STATE_RUN || !c->profile || c->active_phase >= c->profile->num_phases) {
+        return 0.0f;
+    }
+    const profile_phase_t *ph = &c->profile->phases[c->active_phase];
+    float ramp_time = (ph->ramp_c_per_s > 0.0f)
+        ? fabsf(ph->target_c - c->phase_start_temp) / ph->ramp_c_per_s
+        : 0.0f;
+    float total = ramp_time + ph->hold_s;
+    if (total <= 0.0f) {
+        return 1.0f;
+    }
+    float t = (float)c->phase_elapsed_ms / 1000.0f;
+    return t >= total ? 1.0f : t / total;
+}
+
 static void ctrl_start(controller_t *c)
 {
     safety_reset(&c->safety); // START also clears a latched fault

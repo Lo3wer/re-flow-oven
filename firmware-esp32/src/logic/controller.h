@@ -54,3 +54,4 @@ ctrl_state_t ctrl_state(const controller_t *c);
 const char *ctrl_phase_name(const controller_t *c);
 safety_fault_t ctrl_fault(const controller_t *c);
 float ctrl_setpoint(const controller_t *c);
+float ctrl_phase_progress(const controller_t *c); // 0..1 within the current phase

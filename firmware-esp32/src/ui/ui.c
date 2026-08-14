@@ -1,247 +1,151 @@
 #include "ui.h"
 
-#include <stdio.h>
 #include <string.h>
 
-#include "driver/gpio.h"
-#include "driver/spi_master.h"
-#include "esp_err.h"
-#include "esp_lcd_panel_io.h"
-#include "esp_lcd_panel_ops.h"
-#include "esp_lcd_panel_st7789.h"
+#include "lvgl.h"
+#include "lvgl_port.h"
 
-// ---- LilyGo T-Display LCD pins ----
-#define LCD_PIN_SCLK GPIO_NUM_18
-#define LCD_PIN_MOSI GPIO_NUM_19
-#define LCD_PIN_CS   GPIO_NUM_5
-#define LCD_PIN_DC   GPIO_NUM_16
-#define LCD_PIN_RST  GPIO_NUM_23
-#define LCD_PIN_BL   GPIO_NUM_4
+#define LCD_H_RES 240
+#define LCD_V_RES 135
 
-#define TEMP_Y  11
-#define BAR_Y(i) (22 + (i) * 38) // 3 bars (22/60/98) fit under title + temp line
+static ui_cmd_cb_t s_cmd_cb;
+static bool s_running;
+static float s_sp;
+static float s_duty;
+static lv_obj_t *s_temp_label;
+static lv_obj_t *s_state_label;
+static lv_obj_t *s_meta_label;
+static lv_obj_t *s_bar;
+static lv_obj_t *s_start_btn;
+static lv_obj_t *s_start_label;
 
-static esp_lcd_panel_handle_t s_panel;
-static uint16_t s_fb[LCD_H_RES * LCD_V_RES];
-
-// ------------------------------------------------------------ framebuffer ---
-static void fb_fill_rect(int x, int y, int w, int h, uint16_t color)
+static void cmd(ui_cmd_t c)
 {
-    for (int r = y; r < y + h; r++) {
-        if (r < 0 || r >= LCD_V_RES) {
-            continue;
-        }
-        for (int c = x; c < x + w; c++) {
-            if (c < 0 || c >= LCD_H_RES) {
-                continue;
-            }
-            s_fb[r * LCD_H_RES + c] = color;
-        }
+    if (s_cmd_cb) {
+        s_cmd_cb(c);
     }
 }
 
-static void fb_flush_rect(int x, int y, int w, int h)
+static void on_start_btn(lv_event_t *e)
 {
-    if (w <= 0 || h <= 0) {
-        return;
-    }
-    if (y + h > LCD_V_RES) {
-        h = LCD_V_RES - y; // never read past the framebuffer
-    }
-    if (x + w > LCD_H_RES) {
-        w = LCD_H_RES - x;
-    }
-    esp_lcd_panel_draw_bitmap(s_panel, x, y, x + w, y + h, &s_fb[y * LCD_H_RES + x]);
+    (void)e;
+    cmd(s_running ? UI_CMD_STOP : UI_CMD_START);
 }
 
-// 5x7 font, 'A'-'Z' then '0'-'9'. Bit 0 of each column byte is the top row.
-static const uint8_t s_font_5x7[36][5] = {
-    {0x7C,0x12,0x11,0x12,0x7C}, // A
-    {0x7F,0x49,0x49,0x49,0x36}, // B
-    {0x3E,0x41,0x41,0x41,0x22}, // C
-    {0x7F,0x41,0x41,0x22,0x1C}, // D
-    {0x7F,0x49,0x49,0x49,0x41}, // E
-    {0x7F,0x09,0x09,0x09,0x01}, // F
-    {0x3E,0x41,0x41,0x51,0x32}, // G
-    {0x7F,0x08,0x08,0x08,0x7F}, // H
-    {0x00,0x41,0x7F,0x41,0x00}, // I
-    {0x20,0x40,0x41,0x3F,0x01}, // J
-    {0x7F,0x08,0x14,0x22,0x41}, // K
-    {0x7F,0x40,0x40,0x40,0x40}, // L
-    {0x7F,0x02,0x04,0x08,0x7F}, // M
-    {0x7F,0x04,0x08,0x10,0x7F}, // N
-    {0x3E,0x41,0x41,0x41,0x3E}, // O
-    {0x7F,0x09,0x09,0x09,0x06}, // P
-    {0x3E,0x41,0x51,0x21,0x5E}, // Q
-    {0x7F,0x09,0x19,0x29,0x46}, // R
-    {0x46,0x49,0x49,0x49,0x31}, // S
-    {0x01,0x01,0x7F,0x01,0x01}, // T
-    {0x3F,0x40,0x40,0x40,0x3F}, // U
-    {0x1F,0x20,0x40,0x20,0x1F}, // V
-    {0x3F,0x40,0x38,0x40,0x3F}, // W
-    {0x63,0x14,0x08,0x14,0x63}, // X
-    {0x07,0x08,0x70,0x08,0x07}, // Y
-    {0x61,0x51,0x49,0x45,0x43}, // Z
-    {0x3E,0x51,0x49,0x45,0x3E}, // 0
-    {0x00,0x42,0x7F,0x40,0x00}, // 1
-    {0x42,0x61,0x51,0x49,0x46}, // 2
-    {0x21,0x41,0x45,0x4B,0x31}, // 3
-    {0x18,0x14,0x12,0x7F,0x10}, // 4
-    {0x27,0x45,0x45,0x45,0x39}, // 5
-    {0x3C,0x4A,0x49,0x49,0x30}, // 6
-    {0x01,0x71,0x09,0x05,0x03}, // 7
-    {0x36,0x49,0x49,0x49,0x36}, // 8
-    {0x06,0x49,0x49,0x29,0x1E}, // 9
-};
-
-static void fb_draw_char(int x, int y, char c, uint16_t color)
+static void on_ack_btn(lv_event_t *e)
 {
-    if (c == '.') {
-        fb_fill_rect(x + 2, y + 5, 1, 2, color);
-        return;
-    }
-    int idx;
-    if (c >= 'A' && c <= 'Z') {
-        idx = c - 'A';
-    } else if (c >= '0' && c <= '9') {
-        idx = 26 + (c - '0');
+    (void)e;
+    cmd(UI_CMD_ACK);
+}
+
+static void update_meta(void)
+{
+    lv_label_set_text_fmt(s_meta_label, "SP %5.1fC   OUT %3.0f%%", s_sp, s_duty);
+}
+
+void ui_set_cmd_cb(ui_cmd_cb_t cb)
+{
+    s_cmd_cb = cb;
+}
+
+void ui_set_temp(float temp_c, bool sensor_open)
+{
+    if (sensor_open) {
+        lv_label_set_text(s_temp_label, "TC OPEN");
     } else {
-        return;
-    }
-    for (int col = 0; col < 5; col++) {
-        uint8_t bits = s_font_5x7[idx][col];
-        for (int row = 0; row < 7; row++) {
-            if (bits & (1 << row)) {
-                fb_fill_rect(x + col, y + row, 1, 1, color);
-            }
-        }
+        lv_label_set_text_fmt(s_temp_label, "%.1f C", temp_c);
     }
 }
 
-static void fb_draw_text(int x, int y, const char *s, uint16_t color)
+void ui_set_state_text(const char *text)
 {
-    while (*s) {
-        if (*s == ' ') {
-            x += 4;
-        } else {
-            fb_draw_char(x, y, *s, color);
-            x += 6;
-        }
-        s++;
+    lv_label_set_text(s_state_label, text);
+    uint32_t color = strncmp(text, "FAULT", 5) == 0 ? 0xFF5555 : 0xFFFFFF;
+    lv_obj_set_style_text_color(s_state_label, lv_color_hex(color), 0);
+}
+
+void ui_set_running(bool running)
+{
+    s_running = running;
+    lv_label_set_text(s_start_label, running ? "STOP" : "START");
+}
+
+void ui_set_phase(float progress01)
+{
+    if (progress01 < 0.0f) {
+        progress01 = 0.0f;
     }
-}
-
-// -------------------------------------------------------------- drawing -----
-static void draw_temp_line(int temp_tenths, const char *note)
-{
-    fb_fill_rect(6, TEMP_Y, LCD_H_RES - 12, 7, COLOR_BLACK);
-    char txt[40];
-    if (temp_tenths < 0) {
-        snprintf(txt, sizeof(txt), "TEMP TC OPEN");
-    } else {
-        int frac = temp_tenths % 10;
-        if (frac < 0) {
-            frac = -frac;
-        }
-        snprintf(txt, sizeof(txt), "TEMP %d.%dC", temp_tenths / 10, frac);
+    if (progress01 > 1.0f) {
+        progress01 = 1.0f;
     }
-    if (note) {
-        strncat(txt, " ", sizeof(txt) - strlen(txt) - 1);
-        strncat(txt, note, sizeof(txt) - strlen(txt) - 1);
-    }
-    fb_draw_text(6, TEMP_Y, txt, COLOR_WHITE);
+    lv_bar_set_value(s_bar, (int32_t)(progress01 * 100), LV_ANIM_OFF);
 }
 
-static void draw_button_state(int btn, bool pressed)
+void ui_set_setpoint(float sp_c)
 {
-    int y = BAR_Y(btn);
-    int h = 36;
-    fb_fill_rect(6, y, LCD_H_RES - 12, h, pressed ? COLOR_GREEN : COLOR_GREY);
-    char txt[24];
-    snprintf(txt, sizeof(txt), "BTN%d %s", btn + 1, pressed ? "PRESSED" : "RELEASED");
-    fb_draw_text(16, y + (h - 7) / 2, txt, COLOR_BLACK);
-    // Full-screen flush: partial-region (sub-window) writes corrupt on this
-    // swapped/mirrored ST7789, while a full-window flush settles cleanly.
-    fb_flush_rect(0, 0, LCD_H_RES, LCD_V_RES);
+    s_sp = sp_c;
+    update_meta();
 }
 
-// -------------------------------------------------------------------- API ---
-void ui_draw_temp_line(int temp_tenths, const char *note)
+void ui_set_duty_pct(float pct)
 {
-    draw_temp_line(temp_tenths, note);
-}
-
-void ui_draw_button_state(int btn, bool pressed)
-{
-    draw_button_state(btn, pressed);
-}
-
-void ui_flush(void)
-{
-    fb_flush_rect(0, 0, LCD_H_RES, LCD_V_RES);
-}
-
-void ui_draw_initial(void)
-{
-    fb_fill_rect(0, 0, LCD_H_RES, LCD_V_RES, COLOR_BLACK);
-    fb_draw_text(6, 2, "REFLOW CTRL", COLOR_WHITE);
-    draw_temp_line(-1, NULL); // "TEMP TC OPEN" until the first real read
-    for (int i = 0; i < 3; i++) {
-        draw_button_state(i, false);
-    }
-    fb_flush_rect(0, 0, LCD_H_RES, LCD_V_RES);
+    s_duty = pct;
+    update_meta();
 }
 
 void ui_init(void)
 {
-    // backlight: plain on/off is enough for the test
-    const gpio_config_t bl_cfg = {
-        .pin_bit_mask = 1ULL << LCD_PIN_BL,
-        .mode = GPIO_MODE_OUTPUT,
-    };
-    ESP_ERROR_CHECK(gpio_config(&bl_cfg));
-    ESP_ERROR_CHECK(gpio_set_level(LCD_PIN_BL, 1));
+    lvgl_port_init();
 
-    // SPI bus for the LCD (write-only: no MISO)
-    const spi_bus_config_t buscfg = {
-        .sclk_io_num = LCD_PIN_SCLK,
-        .mosi_io_num = LCD_PIN_MOSI,
-        .miso_io_num = GPIO_NUM_NC,
-        .quadwp_io_num = GPIO_NUM_NC,
-        .quadhd_io_num = GPIO_NUM_NC,
-        .max_transfer_sz = LCD_H_RES * 40 * sizeof(uint16_t),
-    };
-    ESP_ERROR_CHECK(spi_bus_initialize(SPI2_HOST, &buscfg, SPI_DMA_CH_AUTO));
+    lv_obj_t *scr = lv_screen_active();
+    lv_obj_set_style_bg_color(scr, lv_color_hex(0x101418), 0);
 
-    // panel IO (4-wire SPI + DC pin)
-    esp_lcd_panel_io_handle_t io_handle = NULL;
-    const esp_lcd_panel_io_spi_config_t io_config = {
-        .dc_gpio_num = LCD_PIN_DC,
-        .cs_gpio_num = LCD_PIN_CS,
-        .pclk_hz = 40 * 1000 * 1000,
-        .lcd_cmd_bits = 8,
-        .lcd_param_bits = 8,
-        .spi_mode = 0,
-        .trans_queue_depth = 10,
-    };
-    ESP_ERROR_CHECK(esp_lcd_new_panel_io_spi((esp_lcd_spi_bus_handle_t)SPI2_HOST, &io_config, &io_handle));
+    lv_obj_t *title = lv_label_create(scr);
+    lv_label_set_text(title, "REFLOW CTRL");
+    lv_obj_set_style_text_color(title, lv_color_hex(0x9BD4FF), 0);
+    lv_obj_set_pos(title, 8, 4);
 
-    // ST7789 panel
-    const esp_lcd_panel_dev_config_t panel_config = {
-        .reset_gpio_num = LCD_PIN_RST,
-        .rgb_ele_order = LCD_RGB_ELEMENT_ORDER_BGR,
-        .bits_per_pixel = 16,
-    };
-    ESP_ERROR_CHECK(esp_lcd_new_panel_st7789(io_handle, &panel_config, &s_panel));
-    ESP_ERROR_CHECK(esp_lcd_panel_reset(s_panel));
-    ESP_ERROR_CHECK(esp_lcd_panel_init(s_panel));
+    s_temp_label = lv_label_create(scr);
+    lv_label_set_text(s_temp_label, "--.- C");
+    lv_obj_set_style_text_font(s_temp_label, &lv_font_montserrat_28, 0);
+    lv_obj_set_style_text_color(s_temp_label, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_pos(s_temp_label, 8, 26);
 
-    // The T-Display's ST7789 glass is natively 135x240 but mounted landscape on
-    // the board (240x135). Rotate + offset it into the correct landscape view.
-    ESP_ERROR_CHECK(esp_lcd_panel_invert_color(s_panel, true));
-    ESP_ERROR_CHECK(esp_lcd_panel_swap_xy(s_panel, true));
-    ESP_ERROR_CHECK(esp_lcd_panel_mirror(s_panel, true, false));
-    ESP_ERROR_CHECK(esp_lcd_panel_set_gap(s_panel, 40, 52)); // x_gap, y_gap
+    s_state_label = lv_label_create(scr);
+    lv_label_set_text(s_state_label, "IDLE");
+    lv_obj_set_style_text_color(s_state_label, lv_color_hex(0xFFFFFF), 0);
+    lv_obj_set_pos(s_state_label, 8, 60);
 
-    ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(s_panel, true));
+    s_meta_label = lv_label_create(scr);
+    lv_label_set_text(s_meta_label, "SP   0.0C   OUT   0%");
+    lv_obj_set_style_text_color(s_meta_label, lv_color_hex(0xAAAAAA), 0);
+    lv_obj_set_pos(s_meta_label, 8, 76);
+
+    s_bar = lv_bar_create(scr);
+    lv_obj_set_pos(s_bar, 8, 92);
+    lv_obj_set_size(s_bar, 224, 8);
+    lv_bar_set_range(s_bar, 0, 100);
+    lv_bar_set_value(s_bar, 0, LV_ANIM_OFF);
+
+    s_start_btn = lv_button_create(scr);
+    lv_obj_set_pos(s_start_btn, 8, 104);
+    lv_obj_set_size(s_start_btn, 110, 28);
+    lv_obj_add_event_cb(s_start_btn, on_start_btn, LV_EVENT_CLICKED, NULL);
+    s_start_label = lv_label_create(s_start_btn);
+    lv_label_set_text(s_start_label, "START");
+    lv_obj_center(s_start_label);
+
+    lv_obj_t *ack_btn = lv_button_create(scr);
+    lv_obj_set_pos(ack_btn, 122, 104);
+    lv_obj_set_size(ack_btn, 110, 28);
+    lv_obj_add_event_cb(ack_btn, on_ack_btn, LV_EVENT_CLICKED, NULL);
+    lv_obj_t *ack_label = lv_label_create(ack_btn);
+    lv_label_set_text(ack_label, "ACK FAULT");
+    lv_obj_center(ack_label);
+
+    lv_group_t *grp = lv_group_create();
+    lv_group_set_default(grp);
+    lv_group_add_obj(grp, s_start_btn);
+    lv_group_add_obj(grp, ack_btn);
+    lvgl_port_set_group(grp);
 }
