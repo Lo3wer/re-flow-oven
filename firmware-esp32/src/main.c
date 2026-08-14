@@ -11,10 +11,12 @@
 #include "esp_lcd_panel_st7789.h"
 
 // ---- Buttons (active-low, edge-triggered ISR). Wiring: each button between
-// the pin and GND; released = high, pressed = low. GPIO 33/32/25 all support
-// internal pull-ups, so no external resistors are needed. ----
-#define BTN_1_GPIO   GPIO_NUM_32
-#define BTN_2_GPIO   GPIO_NUM_33
+// the pin and GND; released = high, pressed = low.
+// BTN1 = GPIO35 (right onboard button, on-board pull-up),
+// BTN2 = GPIO0  (left onboard button / BOOT, internal pull-up enabled below),
+// BTN3 = GPIO25 (external button, internal pull-up). ----
+#define BTN_1_GPIO   GPIO_NUM_35
+#define BTN_2_GPIO   GPIO_NUM_0
 #define BTN_3_GPIO   GPIO_NUM_25
 
 // ---- LilyGo T-Display LCD pins ----
@@ -27,6 +29,13 @@
 
 #define LCD_H_RES  240
 #define LCD_V_RES  135
+
+// ---- MAX6675 thermocouple (SPI slave on its own bus). GPIO18 (LCD clock)
+// isn't exposed on the T-Display headers, so use a second SPI host on free
+// pins: SCK=17, CS=26, SO=27. Receive-only, so no MOSI needed. ----
+#define MAX6675_SCK_GPIO  GPIO_NUM_17
+#define MAX6675_CS_GPIO   GPIO_NUM_26
+#define MAX6675_SO_GPIO   GPIO_NUM_27
 
 #define COLOR_BLACK   0x0000
 #define COLOR_WHITE   0xFFFF
@@ -44,6 +53,7 @@ static QueueHandle_t s_btn_evt_queue;
 
 static esp_lcd_panel_handle_t s_panel;
 static uint16_t s_fb[LCD_H_RES * LCD_V_RES];
+static spi_device_handle_t s_tc_spi;
 
 // ---------------------------------------------------------------- buttons ----
 // Runs in ISR context: only reads the pin and posts to a queue.
@@ -151,6 +161,10 @@ static const uint8_t s_font_5x7[36][5] = {
 
 static void fb_draw_char(int x, int y, char c, uint16_t color)
 {
+    if (c == '.') {
+        fb_fill_rect(x + 2, y + 5, 1, 2, color);
+        return;
+    }
     int idx;
     if (c >= 'A' && c <= 'Z') {
         idx = c - 'A';
@@ -183,9 +197,28 @@ static void fb_draw_text(int x, int y, const char *s, uint16_t color)
 }
 
 // -------------------------------------------------------------- UI / lcd ----
+#define TEMP_Y   11
+#define BAR_Y(i) (22 + (i) * 38)   // 3 bars (22/60/98) fit under title + temp line
+
+static void draw_temp_line(int temp_tenths) // tenths of C; <0 = open/error
+{
+    fb_fill_rect(6, TEMP_Y, LCD_H_RES - 12, 7, COLOR_BLACK);
+    char txt[24];
+    if (temp_tenths < 0) {
+        snprintf(txt, sizeof(txt), "TEMP TC OPEN");
+    } else {
+        int frac = temp_tenths % 10;
+        if (frac < 0) {
+            frac = -frac;
+        }
+        snprintf(txt, sizeof(txt), "TEMP %d.%dC", temp_tenths / 10, frac);
+    }
+    fb_draw_text(6, TEMP_Y, txt, COLOR_WHITE);
+}
+
 static void draw_button_state(int btn, bool pressed)
 {
-    int y = 12 + btn * 39; // 3 bars + title all fit within 135 rows
+    int y = BAR_Y(btn);
     int h = 36;
     fb_fill_rect(6, y, LCD_H_RES - 12, h, pressed ? COLOR_GREEN : COLOR_GREY);
     char txt[24];
@@ -199,7 +232,8 @@ static void draw_button_state(int btn, bool pressed)
 static void draw_initial_ui(void)
 {
     fb_fill_rect(0, 0, LCD_H_RES, LCD_V_RES, COLOR_BLACK);
-    fb_draw_text(6, 4, "BUTTON TEST", COLOR_WHITE);
+    fb_draw_text(6, 2, "REFLOW TEST", COLOR_WHITE);
+    draw_temp_line(-1); // "TEMP TC OPEN" until the first real read
     for (int i = 0; i < 3; i++) {
         draw_button_state(i, false);
     }
@@ -216,7 +250,7 @@ static void init_lcd(void)
     ESP_ERROR_CHECK(gpio_config(&bl_cfg));
     ESP_ERROR_CHECK(gpio_set_level(LCD_PIN_BL, 1));
 
-    // SPI bus (display is write-only: no MISO)
+    // SPI bus for the LCD (write-only: no MISO)
     const spi_bus_config_t buscfg = {
         .sclk_io_num = LCD_PIN_SCLK,
         .mosi_io_num = LCD_PIN_MOSI,
@@ -260,6 +294,54 @@ static void init_lcd(void)
     ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(s_panel, true));
 }
 
+// ------------------------------------------------------------- MAX6675 ------
+static void init_max6675(void)
+{
+    // Dedicated receive-only SPI bus for the thermocouple
+    const spi_bus_config_t buscfg = {
+        .sclk_io_num = MAX6675_SCK_GPIO,
+        .mosi_io_num = GPIO_NUM_NC, // receive-only: no MOSI wired
+        .miso_io_num = MAX6675_SO_GPIO,
+        .quadwp_io_num = GPIO_NUM_NC,
+        .quadhd_io_num = GPIO_NUM_NC,
+        .max_transfer_sz = 32,
+    };
+    ESP_ERROR_CHECK(spi_bus_initialize(SPI3_HOST, &buscfg, SPI_DMA_CH_AUTO));
+
+    const spi_device_interface_config_t devcfg = {
+        .mode = 0, // MAX6675 clocks data out on SCK falling edge, sampled on rising
+        .clock_speed_hz = 1000000, // datasheet max is 4.3 MHz
+        .spics_io_num = MAX6675_CS_GPIO,
+        .queue_size = 1,
+        .flags = SPI_DEVICE_HALFDUPLEX,
+    };
+    ESP_ERROR_CHECK(spi_bus_add_device(SPI3_HOST, &devcfg, &s_tc_spi));
+}
+
+// Returns temperature in tenths of a degree C, or -1 if the thermocouple is
+// open (bit 2 set) / read failed. Resolution is 0.25 C -> 2.5 tenths.
+static int max6675_read_tenths(void)
+{
+    uint8_t rx[2] = { 0, 0 };
+    spi_transaction_t t = {
+        .length = 0, // half-duplex, receive only
+        .rxlength = 16,
+        .rx_buffer = rx,
+    };
+    if (spi_device_transmit(s_tc_spi, &t) != ESP_OK) {
+        return -1;
+    }
+    uint16_t raw = ((uint16_t)rx[0] << 8) | rx[1];
+    if (raw & 0x04) {
+        return -1; // thermocouple input open
+    }
+    int16_t bits = (int16_t)((raw >> 3) & 0x0FFF);
+    if (bits & 0x0800) {
+        bits |= (int16_t)0xF000; // sign-extend 12-bit two's complement
+    }
+    return bits * 5 / 2; // 0.25 C per LSB
+}
+
 // ------------------------------------------------------------------ tasks ---
 static void ui_task(void *arg)
 {
@@ -279,10 +361,21 @@ static void ui_task(void *arg)
     }
 }
 
+static void temp_task(void *arg)
+{
+    while (1) {
+        draw_temp_line(max6675_read_tenths());
+        fb_flush_rect(0, 0, LCD_H_RES, LCD_V_RES);
+        vTaskDelay(pdMS_TO_TICKS(500)); // MAX6675 conversion time ~220 ms
+    }
+}
+
 void app_main(void)
 {
     init_lcd();
+    init_max6675();
     init_buttons();
     draw_initial_ui();
     xTaskCreate(ui_task, "ui", 4096, NULL, 5, NULL);
+    xTaskCreate(temp_task, "temp", 4096, NULL, 4, NULL);
 }
