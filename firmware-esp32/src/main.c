@@ -10,11 +10,12 @@
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_panel_st7789.h"
 
-// ---- Buttons (active-low, edge-triggered ISR). Note: GPIO 36/37/38 are
-// input-only pins without internal pull-ups, so they need external pull-ups. ----
-#define BTN_1_GPIO   GPIO_NUM_36
-#define BTN_2_GPIO   GPIO_NUM_37
-#define BTN_3_GPIO   GPIO_NUM_38
+// ---- Buttons (active-low, edge-triggered ISR). Wiring: each button between
+// the pin and GND; released = high, pressed = low. GPIO 33/32/25 all support
+// internal pull-ups, so no external resistors are needed. ----
+#define BTN_1_GPIO   GPIO_NUM_32
+#define BTN_2_GPIO   GPIO_NUM_33
+#define BTN_3_GPIO   GPIO_NUM_25
 
 // ---- LilyGo T-Display LCD pins ----
 #define LCD_PIN_SCLK GPIO_NUM_18
@@ -96,6 +97,15 @@ static void fb_fill_rect(int x, int y, int w, int h, uint16_t color)
 
 static void fb_flush_rect(int x, int y, int w, int h)
 {
+    if (w <= 0 || h <= 0) {
+        return;
+    }
+    if (y + h > LCD_V_RES) {
+        h = LCD_V_RES - y; // never read past the framebuffer
+    }
+    if (x + w > LCD_H_RES) {
+        w = LCD_H_RES - x;
+    }
     esp_lcd_panel_draw_bitmap(s_panel, x, y, x + w, y + h, &s_fb[y * LCD_H_RES + x]);
 }
 
@@ -175,12 +185,13 @@ static void fb_draw_text(int x, int y, const char *s, uint16_t color)
 // -------------------------------------------------------------- UI / lcd ----
 static void draw_button_state(int btn, bool pressed)
 {
-    int y = 20 + btn * 45;
-    fb_fill_rect(6, y, LCD_H_RES - 12, 36, pressed ? COLOR_GREEN : COLOR_GREY);
+    int y = 12 + btn * 39; // 3 bars + title all fit within 135 rows
+    int h = 36;
+    fb_fill_rect(6, y, LCD_H_RES - 12, h, pressed ? COLOR_GREEN : COLOR_GREY);
     char txt[24];
     snprintf(txt, sizeof(txt), "BTN%d %s", btn + 1, pressed ? "PRESSED" : "RELEASED");
-    fb_draw_text(16, y + 13, txt, COLOR_BLACK);
-    fb_flush_rect(6, y, LCD_H_RES - 12, 36);
+    fb_draw_text(16, y + (h - 7) / 2, txt, COLOR_BLACK);
+    fb_flush_rect(6, y, LCD_H_RES - 12, h);
 }
 
 static void draw_initial_ui(void)
@@ -236,8 +247,14 @@ static void init_lcd(void)
     ESP_ERROR_CHECK(esp_lcd_new_panel_st7789(io_handle, &panel_config, &s_panel));
     ESP_ERROR_CHECK(esp_lcd_panel_reset(s_panel));
     ESP_ERROR_CHECK(esp_lcd_panel_init(s_panel));
+
+    // The T-Display's ST7789 glass is natively 135x240 but mounted landscape on
+    // the board (240x135). Rotate + offset it into the correct landscape view.
     ESP_ERROR_CHECK(esp_lcd_panel_invert_color(s_panel, true));
-    // If the image looks shifted, tune the window: esp_lcd_panel_set_gap(s_panel, 0, 52);
+    ESP_ERROR_CHECK(esp_lcd_panel_swap_xy(s_panel, true));
+    ESP_ERROR_CHECK(esp_lcd_panel_mirror(s_panel, true, false));
+    ESP_ERROR_CHECK(esp_lcd_panel_set_gap(s_panel, 40, 52)); // x_gap, y_gap
+
     ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(s_panel, true));
 }
 
