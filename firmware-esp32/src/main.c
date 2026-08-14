@@ -7,6 +7,8 @@
 
 #include "controller.h"
 #include "history.h"
+#include "net/server.h"
+#include "net/wifi.h"
 #include "relay.h"
 #include "safety.h"
 #include "storage/config.h"
@@ -113,5 +115,7 @@ void app_main(void)
     tc_init();
     relay_init();
     ui_set_cmd_cb(on_ui_cmd);
+    wifi_init();
+    server_init(&s_ctrl, &s_history);
     xTaskCreate(temp_task, "temp", 4096, NULL, 4, NULL);
 }

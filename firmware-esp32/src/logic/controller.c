@@ -57,6 +57,16 @@ float ctrl_setpoint(const controller_t *c)
     return c->setpoint_c;
 }
 
+float ctrl_last_temp(const controller_t *c)
+{
+    return c->last_temp;
+}
+
+float ctrl_duty(const controller_t *c)
+{
+    return c->duty;
+}
+
 float ctrl_phase_progress(const controller_t *c)
 {
     if (c->state != CTRL_STATE_RUN || !c->profile || c->active_phase >= c->profile->num_phases) {

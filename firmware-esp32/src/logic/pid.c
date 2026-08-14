@@ -1,6 +1,6 @@
 #include "pid.h"
 
-void pid_init(pid_t *pid, float kp, float ki, float kd, float setpoint,
+void pid_init(pid_controller_t *pid, float kp, float ki, float kd, float setpoint,
               float out_min, float out_max)
 {
     pid->kp = kp;
@@ -12,19 +12,19 @@ void pid_init(pid_t *pid, float kp, float ki, float kd, float setpoint,
     pid_reset(pid);
 }
 
-void pid_reset(pid_t *pid)
+void pid_reset(pid_controller_t *pid)
 {
     pid->integral = 0.0f;
     pid->prev_error = 0.0f;
     pid->initialized = false;
 }
 
-void pid_set_setpoint(pid_t *pid, float setpoint)
+void pid_set_setpoint(pid_controller_t *pid, float setpoint)
 {
     pid->setpoint = setpoint;
 }
 
-float pid_update(pid_t *pid, float measurement, float dt)
+float pid_update(pid_controller_t *pid, float measurement, float dt)
 {
     float error = pid->setpoint - measurement;
     if (!pid->initialized) {

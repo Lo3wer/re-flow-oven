@@ -37,7 +37,7 @@ typedef struct {
     uint32_t run_elapsed_ms;
     uint32_t phase_elapsed_ms;
     const reflow_profile_t *profile;
-    pid_t pid;
+    pid_controller_t pid;
     safety_t safety;
     QueueHandle_t cmd_queue;
     bool reset_requested;  // ack-fault pending
@@ -55,3 +55,5 @@ const char *ctrl_phase_name(const controller_t *c);
 safety_fault_t ctrl_fault(const controller_t *c);
 float ctrl_setpoint(const controller_t *c);
 float ctrl_phase_progress(const controller_t *c); // 0..1 within the current phase
+float ctrl_last_temp(const controller_t *c);
+float ctrl_duty(const controller_t *c);

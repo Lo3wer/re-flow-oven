@@ -113,3 +113,39 @@ void config_set_selected(uint8_t i)
         s_selected = i;
     }
 }
+
+static char s_wifi_ssid[33] = "";
+static char s_wifi_pass[65] = "";
+
+void config_set_wifi(const char *ssid, const char *pass)
+{
+    strncpy(s_wifi_ssid, ssid, sizeof(s_wifi_ssid) - 1);
+    strncpy(s_wifi_pass, pass, sizeof(s_wifi_pass) - 1);
+    nvs_handle_t h;
+    if (nvs_open("reflow", NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_str(h, "ssid", s_wifi_ssid);
+        nvs_set_str(h, "pass", s_wifi_pass);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+}
+
+void config_get_wifi(char *ssid, size_t ssid_len, char *pass, size_t pass_len)
+{
+    s_wifi_ssid[0] = '\0';
+    s_wifi_pass[0] = '\0';
+    nvs_handle_t h;
+    if (nvs_open("reflow", NVS_READONLY, &h) == ESP_OK) {
+        size_t l = ssid_len;
+        if (nvs_get_str(h, "ssid", s_wifi_ssid, &l) != ESP_OK) {
+            s_wifi_ssid[0] = '\0';
+        }
+        l = pass_len;
+        if (nvs_get_str(h, "pass", s_wifi_pass, &l) != ESP_OK) {
+            s_wifi_pass[0] = '\0';
+        }
+        nvs_close(h);
+    }
+    strncpy(ssid, s_wifi_ssid, ssid_len);
+    strncpy(pass, s_wifi_pass, pass_len);
+}
