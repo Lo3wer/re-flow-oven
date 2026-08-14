@@ -13,9 +13,10 @@
 #define LCD_H_RES 240
 #define LCD_V_RES 135
 
-#define BTN_ENTER 0
-#define BTN_UP    1
-#define BTN_DOWN  2
+// Button roles: BTN3 selects/confirms; BTN1/BTN2 navigate.
+#define BTN_UP   0
+#define BTN_DOWN 1
+#define BTN_ENTER 2
 
 // ---------------------------------------------------------------- helpers ----
 static void show(lv_obj_t *o, bool visible)
@@ -359,10 +360,10 @@ static void ui_poll(void)
 
     switch (s_screen) {
         case SCR_HOME: {
-            if (btn_event(BTN_UP, true)) {
+            if (btn_event(BTN_UP, false)) {
                 s_home_focus = (s_home_focus + 2) % 3;
                 home_draw_focus();
-            } else if (btn_event(BTN_DOWN, true)) {
+            } else if (btn_event(BTN_DOWN, false)) {
                 s_home_focus = (s_home_focus + 1) % 3;
                 home_draw_focus();
             } else if (btn_event(BTN_ENTER, false)) {
@@ -379,10 +380,10 @@ static void ui_poll(void)
 
         case SCR_PROFILES: {
             int n = CONFIG_PROFILE_COUNT + 1;
-            if (btn_event(BTN_UP, true)) {
+            if (btn_event(BTN_UP, false)) {
                 s_prof_focus = (s_prof_focus + n - 1) % n;
                 prof_update_text();
-            } else if (btn_event(BTN_DOWN, true)) {
+            } else if (btn_event(BTN_DOWN, false)) {
                 s_prof_focus = (s_prof_focus + 1) % n;
                 prof_update_text();
             } else if (btn_event(BTN_ENTER, false)) {
@@ -399,14 +400,14 @@ static void ui_poll(void)
 
         case SCR_EDITOR: {
             int n = edit_slot_count();
-            if (btn_event(BTN_UP, true)) {
+            if (btn_event(BTN_UP, false)) {
                 if (s_edit_adjust) {
                     edit_adjust(-1);
                 } else {
                     s_edit_slot = (s_edit_slot + n - 1) % n;
                     edit_update_text();
                 }
-            } else if (btn_event(BTN_DOWN, true)) {
+            } else if (btn_event(BTN_DOWN, false)) {
                 if (s_edit_adjust) {
                     edit_adjust(+1);
                 } else {
