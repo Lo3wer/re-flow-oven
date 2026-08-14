@@ -11,6 +11,7 @@ typedef enum {
     SAFETY_RUN_AWAY,       // temp rose too fast for too long
     SAFETY_RISE_WHILE_OFF, // temp kept rising while the heater was commanded off
     SAFETY_SENSOR,         // too many consecutive invalid readings
+    SAFETY_RUN_TIMEOUT,    // run exceeded max_run_s
 } safety_fault_t;
 
 typedef struct {
@@ -20,6 +21,7 @@ typedef struct {
     float duty_off_threshold;  // duty fraction at/below this counts as "heater off", e.g. 0.03
     float rise_while_off_c;    // allowed rise while the heater is off, e.g. 8 C
     size_t sensor_fault_count; // consecutive bad reads before a sensor fault, e.g. 3
+    float max_run_s;           // max run time before a timeout fault, e.g. 600 (0 = disabled)
 } safety_config_t;
 
 typedef struct {
@@ -41,3 +43,5 @@ void safety_init(safety_t *s, const safety_config_t *cfg);
 bool safety_update(safety_t *s, bool sensor_ok, float temp_c, float duty, float dt);
 safety_fault_t safety_fault(const safety_t *s);
 void safety_reset(safety_t *s);
+// Force-latch a fault (used by the controller for e.g. run-time timeout).
+void safety_trip(safety_t *s, safety_fault_t fault);

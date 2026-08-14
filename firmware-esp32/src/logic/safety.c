@@ -23,6 +23,11 @@ safety_fault_t safety_fault(const safety_t *s)
     return s->fault;
 }
 
+void safety_trip(safety_t *s, safety_fault_t fault)
+{
+    s->fault = fault;
+}
+
 bool safety_update(safety_t *s, bool sensor_ok, float temp_c, float duty, float dt)
 {
     // Latching: once a fault trips, stay off until safety_reset().

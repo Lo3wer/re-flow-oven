@@ -184,7 +184,7 @@ void ui_flush(void)
 void ui_draw_initial(void)
 {
     fb_fill_rect(0, 0, LCD_H_RES, LCD_V_RES, COLOR_BLACK);
-    fb_draw_text(6, 2, "REFLOW TEST", COLOR_WHITE);
+    fb_draw_text(6, 2, "REFLOW CTRL", COLOR_WHITE);
     draw_temp_line(-1, NULL); // "TEMP TC OPEN" until the first real read
     for (int i = 0; i < 3; i++) {
         draw_button_state(i, false);
