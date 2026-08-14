@@ -2,8 +2,11 @@
 
 #include <math.h>
 
+#include "esp_log.h"
 #include "freertos/queue.h"
 #include "relay.h"
+
+#define TAG "ctrl"
 
 void ctrl_init(controller_t *c, const safety_config_t *scfg,
                const reflow_profile_t *profile, float kp, float ki, float kd)
@@ -108,6 +111,7 @@ static void ctrl_stop(controller_t *c)
 
 static void ctrl_handle_cmd(controller_t *c, const ctrl_cmd_t *cmd)
 {
+    ESP_LOGI(TAG, "cmd %d received (state before=%d)", (int)cmd->type, (int)c->state);
     switch (cmd->type) {
         case CTRL_CMD_START:
             if (c->state == CTRL_STATE_RUN) {

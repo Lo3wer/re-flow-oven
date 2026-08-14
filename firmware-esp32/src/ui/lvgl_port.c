@@ -59,7 +59,7 @@ static void lvgl_task(void *arg)
         if (s_poll_cb) {
             s_poll_cb();
         }
-        vTaskDelay(pdMS_TO_TICKS(5));
+        vTaskDelay(pdMS_TO_TICKS(10)); // >= 1 tick at the 100 Hz scheduler
     }
 }
 
@@ -141,5 +141,7 @@ void lvgl_port_init(void)
 
 void lvgl_port_start(void)
 {
-    xTaskCreate(lvgl_task, "lvgl", 8192, NULL, 5, NULL);
+    // Run LVGL on core 1 so a render-heavy lvgl task can't starve the control
+    // / network tasks on core 0 (app_main, temp_task).
+    xTaskCreatePinnedToCore(lvgl_task, "lvgl", 8192, NULL, 5, NULL, 1);
 }

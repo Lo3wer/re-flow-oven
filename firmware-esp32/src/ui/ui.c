@@ -134,7 +134,9 @@ static int s_home_focus;
 
 static void update_meta(void)
 {
-    lv_label_set_text_fmt(s_meta_label, "SP %5.1fC   OUT %3.0f%%", s_sp, s_duty);
+    char buf[32];
+    snprintf(buf, sizeof buf, "SP %5.1fC   OUT %3.0f%%", s_sp, s_duty);
+    lv_label_set_text(s_meta_label, buf);
 }
 
 static void home_draw_focus(void)
@@ -320,7 +322,9 @@ static void apply_pending(void)
         if (s_pend_sensor_open) {
             lv_label_set_text(s_temp_label, "TC OPEN");
         } else {
-            lv_label_set_text_fmt(s_temp_label, "%.1f C", s_pend_temp_c);
+            char buf[24];
+            snprintf(buf, sizeof buf, "%.1f C", (double)s_pend_temp_c);
+            lv_label_set_text(s_temp_label, buf);
         }
     }
     if (s_pend_state) {
@@ -519,5 +523,4 @@ void ui_init(void)
     open_home();
 
     s_ui_ready = true; // from now on ui_poll may touch the widgets
-    lvgl_port_start(); // start rendering only after the whole UI is built
 }

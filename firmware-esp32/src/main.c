@@ -1,6 +1,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "esp_heap_caps.h"
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -8,6 +9,7 @@
 
 #include "controller.h"
 #include "history.h"
+#include "lvgl_port.h"
 #include "net/server.h"
 #include "net/wifi.h"
 #include "relay.h"
@@ -59,6 +61,7 @@ static const char *state_text(void)
 
 static void on_ui_cmd(ui_cmd_t cmd)
 {
+    ESP_LOGI(TAG, "ui cmd %d", (int)cmd);
     switch (cmd) {
         case UI_CMD_START: ctrl_post(&s_ctrl, CTRL_CMD_START, 0); break;
         case UI_CMD_STOP:  ctrl_post(&s_ctrl, CTRL_CMD_STOP, 0); break;
@@ -80,6 +83,8 @@ static void temp_task(void *arg)
     };
     ctrl_init(&s_ctrl, &scfg, &config_profiles()[config_selected()], PID_KP, PID_KI, PID_KD);
     history_init(&s_history);
+
+    ESP_LOGI(TAG, "temp_task alive: heap=%u", heap_caps_get_free_size(MALLOC_CAP_8BIT));
 
     int64_t last = esp_timer_get_time();
     while (1) {
@@ -124,5 +129,13 @@ void app_main(void)
     ESP_LOGI(TAG, "wifi ok");
     server_init(&s_ctrl, &s_history);
     ESP_LOGI(TAG, "server ok");
-    xTaskCreate(temp_task, "temp", 8192, NULL, 4, NULL);
+    ESP_LOGI(TAG, "heap before temp task: %u", heap_caps_get_free_size(MALLOC_CAP_8BIT));
+    BaseType_t tcreated = xTaskCreatePinnedToCore(temp_task, "temp", 8192, NULL, 4, NULL, 0);
+    if (tcreated != pdPASS) {
+        ESP_LOGE(TAG, "FAILED to create temp_task (heap exhausted?)");
+    } else {
+        ESP_LOGI(TAG, "temp_task created");
+    }
+    lvgl_port_start(); // start rendering last; run on core 1
+    ESP_LOGI(TAG, "lvgl started");
 }
