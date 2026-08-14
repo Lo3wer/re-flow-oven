@@ -1,8 +1,9 @@
 # ---- CMake / build artifacts (firmware) ----
-firmware/firmware/build/
+firmware-stm32f103c8t6/firmware/build/
 
 # ---- PlatformIO build artifacts ----
-firmware/.pio/
+firmware-stm32f103c8t6/.pio/
+firmware-esp32/.pio/
 
 # ---- Compiled firmware outputs ----
 *.elf
