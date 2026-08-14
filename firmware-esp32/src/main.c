@@ -191,7 +191,9 @@ static void draw_button_state(int btn, bool pressed)
     char txt[24];
     snprintf(txt, sizeof(txt), "BTN%d %s", btn + 1, pressed ? "PRESSED" : "RELEASED");
     fb_draw_text(16, y + (h - 7) / 2, txt, COLOR_BLACK);
-    fb_flush_rect(6, y, LCD_H_RES - 12, h);
+    // Full-screen flush: partial-region (sub-window) writes corrupt on this
+    // swapped/mirrored ST7789, while a full-window flush settles cleanly.
+    fb_flush_rect(0, 0, LCD_H_RES, LCD_V_RES);
 }
 
 static void draw_initial_ui(void)
