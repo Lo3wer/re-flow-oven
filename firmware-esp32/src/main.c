@@ -1,14 +1,24 @@
 #include <stdbool.h>
+#include <stdint.h>
 
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
 #include "buttons.h"
+#include "pid.h"
 #include "relay.h"
 #include "thermocouple.h"
 #include "ui.h"
 
-#define RELAY_ON_TENTHS 320 // relay on above 32.0 C, off otherwise
+// PID settings (tune these). Temperature is measured in deg C; the output is a
+// PWM duty 0..RELAY_PWM_MAX. Setpoint is a typical reflow peak temperature.
+#define PID_KP         8.0f  // duty per deg C of error
+#define PID_KI         0.05f // duty per (deg C * s) of accumulated error
+#define PID_KD         20.0f // duty per (deg C/s) of error change
+#define PID_SETPOINT_C 245.0f
+
+static pid_t s_pid;
 
 static void ui_task(void *arg)
 {
@@ -22,11 +32,21 @@ static void ui_task(void *arg)
 
 static void temp_task(void *arg)
 {
-    while (1) {
-        int temp = tc_read_tenths();
+    pid_init(&s_pid, PID_KP, PID_KI, PID_KD, PID_SETPOINT_C, 0.0f, RELAY_PWM_MAX);
 
-        // Simple on/off control for now; a PID will replace this later.
-        relay_set_duty(temp > RELAY_ON_TENTHS ? RELAY_PWM_MAX : 0);
+    int64_t last = esp_timer_get_time();
+    while (1) {
+        float dt = (esp_timer_get_time() - last) / 1e6f;
+        last = esp_timer_get_time();
+
+        int temp = tc_read_tenths();
+        if (temp >= 0) {
+            float duty = pid_update(&s_pid, temp / 10.0f, dt);
+            relay_set_duty((uint32_t)duty);
+        } else {
+            pid_reset(&s_pid); // no valid reading: drop integrator, kill heater
+            relay_set_duty(0);
+        }
 
         ui_draw_temp_line(temp);
         ui_flush();
