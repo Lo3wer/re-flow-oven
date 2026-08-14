@@ -137,6 +137,9 @@ void lvgl_port_init(void)
     lv_display_set_flush_cb(s_disp, lv_flush_cb);
 
     ESP_LOGI(TAG, "display + LVGL ready");
+}
 
+void lvgl_port_start(void)
+{
     xTaskCreate(lvgl_task, "lvgl", 8192, NULL, 5, NULL);
 }

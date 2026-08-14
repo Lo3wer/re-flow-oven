@@ -518,5 +518,5 @@ void ui_init(void)
     open_home();
 
     s_ui_ready = true; // from now on ui_poll may touch the widgets
-    lv_refr_now(NULL); // draw the first frame synchronously so a broken boot is obvious
+    lvgl_port_start(); // start rendering only after the whole UI is built
 }
