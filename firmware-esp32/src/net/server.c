@@ -233,5 +233,5 @@ void server_init(controller_t *ctrl, history_t *hist)
     u.is_websocket = true;
     httpd_register_uri_handler(s_server, &u);
 
-    xTaskCreate(ws_push_task, "wspush", 3072, NULL, 4, NULL);
+    xTaskCreate(ws_push_task, "wspush", 4096, NULL, 4, NULL);
 }

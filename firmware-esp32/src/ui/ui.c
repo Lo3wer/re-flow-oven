@@ -44,10 +44,30 @@ static lv_obj_t *s_edit_hint;
 static void update_meta(void);
 
 // ------------------------------------------------------------- public API ---
+// All ui_set_* calls just stage values; they are applied to LVGL only inside
+// ui_poll(), which runs on the LVGL task. This keeps every LVGL call on one
+// thread (calling lv_label_set_text() from another task while a refresh is in
+// progress trips LVGL's "invalidate during rendering" assert and reboots).
 static ui_cmd_cb_t s_cmd_cb;
 static bool s_running;
 static float s_sp;
 static float s_duty;
+
+static bool s_ui_ready;
+
+static volatile bool s_pend_temp;
+static float s_pend_temp_c;
+static bool s_pend_sensor_open;
+static volatile bool s_pend_state;
+static char s_pend_state_text[16];
+static volatile bool s_pend_running;
+static bool s_pend_running_val;
+static volatile bool s_pend_sp;
+static float s_pend_sp_val;
+static volatile bool s_pend_duty;
+static float s_pend_duty_val;
+static volatile bool s_pend_phase;
+static float s_pend_phase_val;
 
 static void cmd(ui_cmd_t c)
 {
@@ -63,24 +83,22 @@ void ui_set_cmd_cb(ui_cmd_cb_t cb)
 
 void ui_set_temp(float temp_c, bool sensor_open)
 {
-    if (sensor_open) {
-        lv_label_set_text(s_temp_label, "TC OPEN");
-    } else {
-        lv_label_set_text_fmt(s_temp_label, "%.1f C", temp_c);
-    }
+    s_pend_temp_c = temp_c;
+    s_pend_sensor_open = sensor_open;
+    s_pend_temp = true;
 }
 
 void ui_set_state_text(const char *text)
 {
-    lv_label_set_text(s_state_label, text);
-    uint32_t color = strncmp(text, "FAULT", 5) == 0 ? 0xFF5555 : 0xFFFFFF;
-    lv_obj_set_style_text_color(s_state_label, lv_color_hex(color), 0);
+    strncpy(s_pend_state_text, text, sizeof(s_pend_state_text) - 1);
+    s_pend_state_text[sizeof(s_pend_state_text) - 1] = '\0';
+    s_pend_state = true;
 }
 
 void ui_set_running(bool running)
 {
-    s_running = running;
-    lv_label_set_text(s_btn_label[0], running ? "STOP" : "START");
+    s_pend_running_val = running;
+    s_pend_running = true;
 }
 
 void ui_set_phase(float progress01)
@@ -91,19 +109,20 @@ void ui_set_phase(float progress01)
     if (progress01 > 1.0f) {
         progress01 = 1.0f;
     }
-    lv_bar_set_value(s_bar, (int32_t)(progress01 * 100), LV_ANIM_OFF);
+    s_pend_phase_val = progress01;
+    s_pend_phase = true;
 }
 
 void ui_set_setpoint(float sp_c)
 {
-    s_sp = sp_c;
-    update_meta();
+    s_pend_sp_val = sp_c;
+    s_pend_sp = true;
 }
 
 void ui_set_duty_pct(float pct)
 {
-    s_duty = pct;
-    update_meta();
+    s_pend_duty_val = pct;
+    s_pend_duty = true;
 }
 
 // ------------------------------------------------------------- home screen --
@@ -292,8 +311,50 @@ static bool btn_event(int btn, bool repeat)
     return false;
 }
 
+// Apply staged ui_set_* values to the widgets. Called from the LVGL task only.
+static void apply_pending(void)
+{
+    if (s_pend_temp) {
+        s_pend_temp = false;
+        if (s_pend_sensor_open) {
+            lv_label_set_text(s_temp_label, "TC OPEN");
+        } else {
+            lv_label_set_text_fmt(s_temp_label, "%.1f C", s_pend_temp_c);
+        }
+    }
+    if (s_pend_state) {
+        s_pend_state = false;
+        lv_label_set_text(s_state_label, s_pend_state_text);
+        uint32_t color = strncmp(s_pend_state_text, "FAULT", 5) == 0 ? 0xFF5555 : 0xFFFFFF;
+        lv_obj_set_style_text_color(s_state_label, lv_color_hex(color), 0);
+    }
+    if (s_pend_running) {
+        s_pend_running = false;
+        s_running = s_pend_running_val;
+        lv_label_set_text(s_btn_label[0], s_running ? "STOP" : "START");
+    }
+    if (s_pend_phase) {
+        s_pend_phase = false;
+        lv_bar_set_value(s_bar, (int32_t)(s_pend_phase_val * 100), LV_ANIM_OFF);
+    }
+    if (s_pend_sp) {
+        s_pend_sp = false;
+        s_sp = s_pend_sp_val;
+        update_meta();
+    }
+    if (s_pend_duty) {
+        s_pend_duty = false;
+        s_duty = s_pend_duty_val;
+        update_meta();
+    }
+}
+
 static void ui_poll(void)
 {
+    if (!s_ui_ready) {
+        return; // widgets not created yet
+    }
+    apply_pending();
     s_now = (uint32_t)(esp_timer_get_time() / 1000);
 
     switch (s_screen) {
@@ -455,4 +516,7 @@ void ui_init(void)
     // start on the home screen
     lv_label_set_text_fmt(s_prof_name_label, "%s", config_profile(config_selected())->name);
     open_home();
+
+    s_ui_ready = true; // from now on ui_poll may touch the widgets
+    lv_refr_now(NULL); // draw the first frame synchronously so a broken boot is obvious
 }

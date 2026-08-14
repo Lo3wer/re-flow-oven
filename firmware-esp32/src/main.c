@@ -1,6 +1,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -14,6 +15,8 @@
 #include "storage/config.h"
 #include "thermocouple.h"
 #include "ui.h"
+
+#define TAG "main"
 
 // PID settings (tune these). Temperature is measured in deg C; the output is a
 // PWM duty 0..RELAY_PWM_MAX.
@@ -111,11 +114,15 @@ static void temp_task(void *arg)
 void app_main(void)
 {
     config_init();
+    ESP_LOGI(TAG, "config ok");
     ui_init();
+    ESP_LOGI(TAG, "ui ok");
     tc_init();
     relay_init();
     ui_set_cmd_cb(on_ui_cmd);
     wifi_init();
+    ESP_LOGI(TAG, "wifi ok");
     server_init(&s_ctrl, &s_history);
-    xTaskCreate(temp_task, "temp", 4096, NULL, 4, NULL);
+    ESP_LOGI(TAG, "server ok");
+    xTaskCreate(temp_task, "temp", 8192, NULL, 4, NULL);
 }

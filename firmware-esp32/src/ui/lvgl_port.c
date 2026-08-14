@@ -9,6 +9,7 @@
 #include "esp_lcd_panel_io.h"
 #include "esp_lcd_panel_ops.h"
 #include "esp_lcd_panel_st7789.h"
+#include "esp_log.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -26,6 +27,8 @@
 #define LCD_H_RES 240
 #define LCD_V_RES 135
 
+#define TAG "lvgl_port"
+
 static esp_lcd_panel_handle_t s_panel;
 static lv_display_t *s_disp;
 static void (*s_poll_cb)(void);
@@ -41,7 +44,10 @@ static void lv_flush_cb(lv_display_t *disp, const lv_area_t *area, uint8_t *px_m
     (void)area;
     // FULL render mode: px_map is the whole-frame buffer. Always flush the full
     // screen - partial-region writes are unreliable on this swapped/mirrored panel.
-    esp_lcd_panel_draw_bitmap(s_panel, 0, 0, LCD_H_RES, LCD_V_RES, px_map);
+    esp_err_t err = esp_lcd_panel_draw_bitmap(s_panel, 0, 0, LCD_H_RES, LCD_V_RES, px_map);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "flush failed: %s", esp_err_to_name(err));
+    }
     lv_display_flush_ready(disp);
 }
 
@@ -111,6 +117,7 @@ void lvgl_port_init(void)
     ESP_ERROR_CHECK(esp_lcd_panel_mirror(s_panel, true, false));
     ESP_ERROR_CHECK(esp_lcd_panel_set_gap(s_panel, 40, 52));
     ESP_ERROR_CHECK(esp_lcd_panel_disp_on_off(s_panel, true));
+    ESP_LOGI(TAG, "ST7789 initialized");
 
     buttons_init();
 
@@ -129,5 +136,7 @@ void lvgl_port_init(void)
                            LV_DISPLAY_RENDER_MODE_FULL);
     lv_display_set_flush_cb(s_disp, lv_flush_cb);
 
-    xTaskCreate(lvgl_task, "lvgl", 4096, NULL, 5, NULL);
+    ESP_LOGI(TAG, "display + LVGL ready");
+
+    xTaskCreate(lvgl_task, "lvgl", 8192, NULL, 5, NULL);
 }
