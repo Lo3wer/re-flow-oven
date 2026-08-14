@@ -1,6 +1,7 @@
 #include "ui.h"
 
 #include <stdio.h>
+#include <string.h>
 
 #include "driver/gpio.h"
 #include "driver/spi_master.h"
@@ -131,10 +132,10 @@ static void fb_draw_text(int x, int y, const char *s, uint16_t color)
 }
 
 // -------------------------------------------------------------- drawing -----
-static void draw_temp_line(int temp_tenths)
+static void draw_temp_line(int temp_tenths, const char *note)
 {
     fb_fill_rect(6, TEMP_Y, LCD_H_RES - 12, 7, COLOR_BLACK);
-    char txt[24];
+    char txt[40];
     if (temp_tenths < 0) {
         snprintf(txt, sizeof(txt), "TEMP TC OPEN");
     } else {
@@ -143,6 +144,10 @@ static void draw_temp_line(int temp_tenths)
             frac = -frac;
         }
         snprintf(txt, sizeof(txt), "TEMP %d.%dC", temp_tenths / 10, frac);
+    }
+    if (note) {
+        strncat(txt, " ", sizeof(txt) - strlen(txt) - 1);
+        strncat(txt, note, sizeof(txt) - strlen(txt) - 1);
     }
     fb_draw_text(6, TEMP_Y, txt, COLOR_WHITE);
 }
@@ -161,9 +166,9 @@ static void draw_button_state(int btn, bool pressed)
 }
 
 // -------------------------------------------------------------------- API ---
-void ui_draw_temp_line(int temp_tenths)
+void ui_draw_temp_line(int temp_tenths, const char *note)
 {
-    draw_temp_line(temp_tenths);
+    draw_temp_line(temp_tenths, note);
 }
 
 void ui_draw_button_state(int btn, bool pressed)
@@ -180,7 +185,7 @@ void ui_draw_initial(void)
 {
     fb_fill_rect(0, 0, LCD_H_RES, LCD_V_RES, COLOR_BLACK);
     fb_draw_text(6, 2, "REFLOW TEST", COLOR_WHITE);
-    draw_temp_line(-1); // "TEMP TC OPEN" until the first real read
+    draw_temp_line(-1, NULL); // "TEMP TC OPEN" until the first real read
     for (int i = 0; i < 3; i++) {
         draw_button_state(i, false);
     }

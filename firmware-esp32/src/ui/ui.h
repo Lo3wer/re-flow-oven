@@ -14,5 +14,5 @@
 void ui_init(void);
 void ui_draw_initial(void);
 void ui_draw_button_state(int btn, bool pressed);
-void ui_draw_temp_line(int temp_tenths); // tenths of C; <0 = open/error
+void ui_draw_temp_line(int temp_tenths, const char *note); // note (e.g. fault) drawn after the temp, or NULL
 void ui_flush(void);
